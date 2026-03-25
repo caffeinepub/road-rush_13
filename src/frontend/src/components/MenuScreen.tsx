@@ -130,17 +130,23 @@ export default function MenuScreen({ onPlay, onLeaderboard }: MenuScreenProps) {
       </main>
 
       {/* Footer */}
-      <footer className="py-4 text-center text-xs text-muted-foreground/60">
-        © {new Date().getFullYear()} · Created by Zoonide Afreed · Built with ❤️
-        using{" "}
-        <a
-          href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-primary transition-colors"
-        >
-          caffeine.ai
-        </a>
+      <footer className="py-4 text-center text-xs text-muted-foreground/60 flex flex-col gap-1">
+        <span>
+          © {new Date().getFullYear()} · Created by Zoonide Afreed · Built with
+          ❤️ using{" "}
+          <a
+            href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-primary transition-colors"
+          >
+            caffeine.ai
+          </a>
+        </span>
+        <span className="text-muted-foreground/40">
+          Special Thanks to: Nekib Ali, Rehana Sultana, Sumaiya Afreen &amp;
+          Little Flower Public School
+        </span>
       </footer>
     </div>
   );

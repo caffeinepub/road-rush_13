@@ -57,6 +57,15 @@ interface PowerUp {
   type: "shield" | "slowmo";
 }
 
+interface ExhaustParticle {
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  radius: number;
+  alpha: number;
+}
+
 interface GameState {
   running: boolean;
   paused: boolean;
@@ -100,26 +109,74 @@ function shadeColor(hex: string, amount: number): string {
   return `rgb(${r},${g},${b})`;
 }
 
+// Parse hex to r,g,b components
+function hexToRgb(hex: string): [number, number, number] {
+  const num = Number.parseInt(hex.replace("#", ""), 16);
+  return [(num >> 16) & 0xff, (num >> 8) & 0xff, num & 0xff];
+}
+
 function drawCar(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   bodyColor: string,
-  darkColor: string,
+  _darkColor: string,
   isPlayer: boolean,
+  time: number,
 ) {
-  ctx.fillStyle = bodyColor;
+  // Shadow / reflection under car
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(
+    x + CAR_WIDTH / 2,
+    y + CAR_HEIGHT + 6,
+    CAR_WIDTH * 0.45,
+    6,
+    0,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.fill();
+  ctx.restore();
+
+  // Body gradient
+  const grad = ctx.createLinearGradient(x, y, x + CAR_WIDTH, y);
+  const [r, g, b] = hexToRgb(bodyColor);
+  grad.addColorStop(
+    0,
+    `rgb(${Math.max(0, r - 40)},${Math.max(0, g - 40)},${Math.max(0, b - 40)})`,
+  );
+  grad.addColorStop(
+    0.35,
+    `rgb(${Math.min(255, r + 30)},${Math.min(255, g + 30)},${Math.min(255, b + 30)})`,
+  );
+  grad.addColorStop(
+    0.65,
+    `rgb(${Math.min(255, r + 30)},${Math.min(255, g + 30)},${Math.min(255, b + 30)})`,
+  );
+  grad.addColorStop(
+    1,
+    `rgb(${Math.max(0, r - 40)},${Math.max(0, g - 40)},${Math.max(0, b - 40)})`,
+  );
+
+  ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.roundRect(x, y, CAR_WIDTH, CAR_HEIGHT, 6);
   ctx.fill();
 
-  ctx.fillStyle = darkColor;
+  // Windshield
   const windH = CAR_HEIGHT * 0.2;
   const windY = isPlayer ? y + CAR_HEIGHT * 0.1 : y + CAR_HEIGHT * 0.65;
+  const windGrad = ctx.createLinearGradient(x + 6, windY, x + 6, windY + windH);
+  windGrad.addColorStop(0, "rgba(150,220,255,0.7)");
+  windGrad.addColorStop(1, "rgba(80,140,200,0.5)");
+  ctx.fillStyle = windGrad;
   ctx.beginPath();
   ctx.roundRect(x + 6, windY, CAR_WIDTH - 12, windH, 3);
   ctx.fill();
 
+  // Wheels
   ctx.fillStyle = "#111";
   const wheelW = 8;
   const wheelH = 18;
@@ -133,24 +190,54 @@ function drawCar(
     ctx.beginPath();
     ctx.roundRect(wx, wy, wheelW, wheelH, 2);
     ctx.fill();
+    // Wheel shine
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.beginPath();
+    ctx.roundRect(wx + 1, wy + 2, 3, 6, 1);
+    ctx.fill();
+    ctx.fillStyle = "#111";
   }
 
   if (isPlayer) {
-    ctx.fillStyle = "#ffe97a";
+    // Tail lights with pulse glow
+    const tailPulse = 0.7 + 0.3 * Math.sin(time * 8);
+    ctx.save();
+    ctx.shadowColor = `rgba(255,50,50,${tailPulse})`;
+    ctx.shadowBlur = 10 * tailPulse;
+    ctx.fillStyle = `rgba(255,${Math.floor(40 + 30 * tailPulse)},40,${tailPulse})`;
     ctx.beginPath();
     ctx.roundRect(x + 4, y + CAR_HEIGHT - 8, 12, 6, 2);
     ctx.fill();
     ctx.beginPath();
     ctx.roundRect(x + CAR_WIDTH - 16, y + CAR_HEIGHT - 8, 12, 6, 2);
     ctx.fill();
+    ctx.restore();
+
+    // Headlights at front (bottom of player)
+    ctx.save();
+    ctx.shadowColor = "rgba(255,240,120,1)";
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = "#fffbaa";
+    ctx.beginPath();
+    ctx.arc(x + 10, y + CAR_HEIGHT - 5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + CAR_WIDTH - 10, y + CAR_HEIGHT - 5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   } else {
-    ctx.fillStyle = "#ff4444";
+    // Enemy headlights at top
+    ctx.save();
+    ctx.shadowColor = "rgba(255,80,80,1)";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = "#ff6666";
     ctx.beginPath();
     ctx.roundRect(x + 4, y + 4, 10, 5, 2);
     ctx.fill();
     ctx.beginPath();
     ctx.roundRect(x + CAR_WIDTH - 14, y + 4, 10, 5, 2);
     ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -163,6 +250,41 @@ function drawPowerUp(
 ) {
   const r = POWERUP_SIZE / 2;
   const pulse = 0.85 + 0.15 * Math.sin(time * 4);
+
+  // Star-burst background (8 short lines radiating outward)
+  const burstColor =
+    type === "shield" ? "rgba(96,165,250,0.6)" : "rgba(251,191,36,0.6)";
+  ctx.save();
+  ctx.strokeStyle = burstColor;
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2 + time * 1.5;
+    const inner = r * 1.1;
+    const outer = r * 1.7;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
+    ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Spinning outer ring (rotating line segments)
+  const ringColor =
+    type === "shield" ? "rgba(147,197,253,0.8)" : "rgba(252,211,77,0.8)";
+  ctx.save();
+  ctx.strokeStyle = ringColor;
+  ctx.lineWidth = 2.5;
+  const ringRadius = r * 1.35;
+  const segmentAngle = Math.PI / 4; // 8 segments
+  const rotation = time * 2.5;
+  for (let i = 0; i < 8; i++) {
+    const startAngle = rotation + (i / 8) * Math.PI * 2;
+    const endAngle = startAngle + segmentAngle * 0.55;
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringRadius, startAngle, endAngle);
+    ctx.stroke();
+  }
+  ctx.restore();
 
   // Outer glow
   const glowColor = type === "shield" ? "rgba(59,130,246," : "rgba(245,158,11,";
@@ -189,11 +311,9 @@ function drawPowerUp(
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   if (type === "shield") {
-    // Draw a small shield shape
     ctx.font = `bold ${Math.round(r)}px sans-serif`;
     ctx.fillText("S", cx, cy + 1);
   } else {
-    // Lightning bolt
     ctx.fillText("⚡", cx, cy + 1);
   }
   ctx.textBaseline = "alphabetic";
@@ -230,7 +350,12 @@ function drawShieldRing(
   ctx.restore();
 }
 
-function drawFrame(canvas: HTMLCanvasElement, state: GameState, time: number) {
+function drawFrame(
+  canvas: HTMLCanvasElement,
+  state: GameState,
+  time: number,
+  exhaust: ExhaustParticle[],
+) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
@@ -239,9 +364,11 @@ function drawFrame(canvas: HTMLCanvasElement, state: GameState, time: number) {
   const roadLeft = getCanvasRoad(canvas);
   const roadRight = roadLeft + ROAD_WIDTH;
 
+  // ─── Grass base ───────────────────────────────────────────
   ctx.fillStyle = COLORS.grass;
   ctx.fillRect(0, 0, W, H);
 
+  // Grass stripes (scrolling)
   const stripeCount = Math.ceil(H / 60) + 1;
   const grassOffset = (state.roadOffset * 0.5) % 60;
   ctx.fillStyle = COLORS.grassStripe;
@@ -251,13 +378,87 @@ function drawFrame(canvas: HTMLCanvasElement, state: GameState, time: number) {
     ctx.fillRect(roadRight + 2, sy, W - roadRight - 2, 30);
   }
 
+  // Scrolling trees & poles on grass
+  const treeSpacing = 90;
+  const treeCount = Math.ceil(H / treeSpacing) + 2;
+  const treeOffset = state.roadOffset % treeSpacing;
+  const grassMid = roadLeft / 2;
+  const rightGrassMid = roadRight + (W - roadRight) / 2;
+  for (let i = -1; i < treeCount; i++) {
+    const ty = i * treeSpacing + treeOffset;
+    // Alternate tree and pole
+    if (i % 2 === 0) {
+      // Tree (dark green triangle)
+      const treeX = grassMid;
+      const treeH = 28;
+      const treeW = 20;
+      ctx.fillStyle = "#0d2b0d";
+      ctx.beginPath();
+      ctx.moveTo(treeX, ty);
+      ctx.lineTo(treeX - treeW / 2, ty + treeH);
+      ctx.lineTo(treeX + treeW / 2, ty + treeH);
+      ctx.closePath();
+      ctx.fill();
+      // Right side
+      ctx.beginPath();
+      ctx.moveTo(rightGrassMid, ty);
+      ctx.lineTo(rightGrassMid - treeW / 2, ty + treeH);
+      ctx.lineTo(rightGrassMid + treeW / 2, ty + treeH);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Pole (vertical rectangle)
+      ctx.fillStyle = "#555";
+      ctx.fillRect(grassMid - 2, ty, 4, 22);
+      ctx.fillStyle = "#888";
+      ctx.fillRect(rightGrassMid - 2, ty, 4, 22);
+    }
+  }
+
+  // Vignette on grass edges
+  const vigLeft = ctx.createLinearGradient(0, 0, roadLeft, 0);
+  vigLeft.addColorStop(0, "rgba(0,0,0,0.55)");
+  vigLeft.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = vigLeft;
+  ctx.fillRect(0, 0, roadLeft, H);
+  const vigRight = ctx.createLinearGradient(roadRight, 0, W, 0);
+  vigRight.addColorStop(0, "rgba(0,0,0,0)");
+  vigRight.addColorStop(1, "rgba(0,0,0,0.55)");
+  ctx.fillStyle = vigRight;
+  ctx.fillRect(roadRight, 0, W - roadRight, H);
+
+  // ─── Shoulder ──────────────────────────────────────────────
   ctx.fillStyle = COLORS.shoulder;
   ctx.fillRect(roadLeft - 8, 0, 8, H);
   ctx.fillRect(roadRight, 0, 8, H);
 
+  // ─── Road base ─────────────────────────────────────────────
   ctx.fillStyle = COLORS.road;
   ctx.fillRect(roadLeft, 0, ROAD_WIDTH, H);
 
+  // Asphalt texture: fine noise-like overlay with semi-transparent tiny rects
+  // Use a seeded-position grid for stable grit
+  ctx.save();
+  ctx.globalAlpha = 0.035;
+  ctx.fillStyle = "#ffffff";
+  const gritSize = 3;
+  for (let gy = 0; gy < H; gy += gritSize * 2) {
+    for (let gx = roadLeft; gx < roadRight; gx += gritSize * 2) {
+      // pseudo-random but stable per position
+      const seed = (gx * 31 + gy * 17) % 100;
+      if (seed < 18) {
+        ctx.fillRect(
+          gx + (seed % gritSize),
+          gy + ((seed * 3) % gritSize),
+          gritSize - 1,
+          gritSize - 1,
+        );
+      }
+    }
+  }
+  ctx.restore();
+
+  // ─── Lane dashes ───────────────────────────────────────────
   ctx.setLineDash([DASH_HEIGHT, DASH_GAP]);
   ctx.lineDashOffset = -(state.roadOffset % DASH_INTERVAL);
   ctx.strokeStyle = "rgba(255,255,255,0.5)";
@@ -272,8 +473,9 @@ function drawFrame(canvas: HTMLCanvasElement, state: GameState, time: number) {
   ctx.setLineDash([]);
   ctx.lineDashOffset = 0;
 
-  ctx.strokeStyle = "rgba(255,255,255,0.8)";
-  ctx.lineWidth = 3;
+  // Road edge lines (solid, wider)
+  ctx.strokeStyle = "rgba(255,255,200,0.9)";
+  ctx.lineWidth = 4;
   ctx.beginPath();
   ctx.moveTo(roadLeft, 0);
   ctx.lineTo(roadLeft, H);
@@ -283,26 +485,76 @@ function drawFrame(canvas: HTMLCanvasElement, state: GameState, time: number) {
   ctx.lineTo(roadRight, H);
   ctx.stroke();
 
-  // Draw power-ups
+  // ─── Speed lines (motion blur effect) ──────────────────────
+  if (state.speed > 400) {
+    const intensity = Math.min(1, (state.speed - 400) / 400);
+    const streakCount = Math.floor(8 + intensity * 18);
+    ctx.save();
+    for (let si = 0; si < streakCount; si++) {
+      // Deterministic positions based on index + road offset bucket
+      const bucket = Math.floor(state.roadOffset / 40);
+      const seed = (si * 137 + bucket * 31) % 1000;
+      const sideOffset = (seed % 60) + 6;
+      const streakH = 30 + (seed % 60);
+      const streakY = (seed * 7) % H;
+      const alpha = 0.04 + intensity * 0.06;
+
+      ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+      ctx.lineWidth = 1;
+      // Left side (between road edge and grass edge)
+      ctx.beginPath();
+      ctx.moveTo(roadLeft - sideOffset, streakY);
+      ctx.lineTo(roadLeft - sideOffset, streakY + streakH);
+      ctx.stroke();
+      // Right side
+      ctx.beginPath();
+      ctx.moveTo(roadRight + sideOffset, streakY);
+      ctx.lineTo(roadRight + sideOffset, streakY + streakH);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ─── Power-ups ─────────────────────────────────────────────
   for (const pu of state.powerups) {
     const cx = getLaneCenterX(roadLeft, pu.lane);
     drawPowerUp(ctx, cx, pu.y + POWERUP_SIZE / 2, pu.type, time);
   }
 
+  // ─── Enemy cars ────────────────────────────────────────────
   for (const enemy of state.enemies) {
     const ex = getLaneX(roadLeft, enemy.lane);
     const darkColor = shadeColor(enemy.color, -40);
-    drawCar(ctx, ex, enemy.y, enemy.color, darkColor, false);
+    drawCar(ctx, ex, enemy.y, enemy.color, darkColor, false, time);
   }
 
   const playerY = H - CAR_HEIGHT - 40;
+
+  // Draw exhaust particles
+  for (const p of exhaust) {
+    ctx.save();
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = "#cccccc";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   // Draw shield ring before player
   if (state.shieldActive) {
     drawShieldRing(ctx, state.playerX, playerY, time);
   }
 
-  drawCar(ctx, state.playerX, playerY, COLORS.player, COLORS.playerDark, true);
+  drawCar(
+    ctx,
+    state.playerX,
+    playerY,
+    COLORS.player,
+    COLORS.playerDark,
+    true,
+    time,
+  );
 
   // Shield flash overlay
   if (state.shieldFlash > 0) {
@@ -311,9 +563,46 @@ function drawFrame(canvas: HTMLCanvasElement, state: GameState, time: number) {
     ctx.fillRect(0, 0, W, H);
   }
 
+  // ─── Slowmo progress bar ───────────────────────────────────
+  if (state.slowmoTimer > 0) {
+    const barW = ROAD_WIDTH;
+    const barH = 5;
+    const barX = roadLeft;
+    const barY = 70;
+    // Background track
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW, barH, 3);
+    ctx.fill();
+    // Gold fill
+    const progress = state.slowmoTimer / 3.0;
+    const fillGrad = ctx.createLinearGradient(barX, barY, barX + barW, barY);
+    fillGrad.addColorStop(0, "#fbbf24");
+    fillGrad.addColorStop(1, "#f59e0b");
+    ctx.fillStyle = fillGrad;
+    ctx.save();
+    ctx.shadowColor = "rgba(251,191,36,0.7)";
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW * progress, barH, 3);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ─── Pause overlay ─────────────────────────────────────────
   if (state.paused) {
     ctx.fillStyle = COLORS.pauseOverlay;
     ctx.fillRect(0, 0, W, H);
+
+    // Scanlines
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = "#000";
+    for (let sl = 0; sl < H; sl += 4) {
+      ctx.fillRect(0, sl, W, 2);
+    }
+    ctx.restore();
+
     ctx.fillStyle = "#f2f5f9";
     ctx.font = "bold 48px 'Bricolage Grotesque', sans-serif";
     ctx.textAlign = "center";
@@ -378,6 +667,7 @@ export default function GameScreen({ onGameOver, onMenu }: GameScreenProps) {
   const lastTimeRef = useRef<number>(0);
   const gameTimeRef = useRef<number>(0);
   const onGameOverRef = useRef(onGameOver);
+  const exhaustRef = useRef<ExhaustParticle[]>([]);
   onGameOverRef.current = onGameOver;
 
   const [paused, setPaused] = useState(false);
@@ -417,7 +707,7 @@ export default function GameScreen({ onGameOver, onMenu }: GameScreenProps) {
       }
 
       state.roadOffset += state.speed * dt * speedMult;
-      state.score = Math.floor(state.roadOffset / 10);
+      state.score = Math.floor(state.roadOffset / 30);
 
       if (state.laneCooldown > 0) state.laneCooldown -= dt * 1000;
 
@@ -550,13 +840,40 @@ export default function GameScreen({ onGameOver, onMenu }: GameScreenProps) {
         }
       }
 
+      // ── Exhaust particles ──
+      const playerY = canvas.height - CAR_HEIGHT - 40;
+      // Spawn 1-2 particles per frame
+      const spawnCount = Math.random() < 0.5 ? 1 : 2;
+      for (let pi = 0; pi < spawnCount; pi++) {
+        if (exhaustRef.current.length < 30) {
+          exhaustRef.current.push({
+            x: state.playerX + CAR_WIDTH / 2 + (Math.random() - 0.5) * 16,
+            y: playerY + CAR_HEIGHT + 2,
+            dx: (Math.random() - 0.5) * 20,
+            dy: -(20 + Math.random() * 30),
+            radius: 3 + Math.random() * 3,
+            alpha: 0.45 + Math.random() * 0.3,
+          });
+        }
+      }
+      // Update particles
+      exhaustRef.current = exhaustRef.current
+        .map((p) => ({
+          ...p,
+          x: p.x + p.dx * dt,
+          y: p.y + p.dy * dt,
+          radius: p.radius * (1 - dt * 2.5),
+          alpha: p.alpha - dt * 1.2,
+        }))
+        .filter((p) => p.alpha > 0 && p.radius > 0.3);
+
       setHudScore(state.score);
       setHudSpeed(Math.round(state.speed));
       setHudShield(state.shieldActive);
       setHudSlowmo(state.slowmoTimer);
     }
 
-    drawFrame(canvas, state, gameTimeRef.current);
+    drawFrame(canvas, state, gameTimeRef.current, exhaustRef.current);
     rafRef.current = requestAnimationFrame(gameLoop);
   }, []);
 
